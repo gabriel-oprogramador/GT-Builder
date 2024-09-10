@@ -23,13 +23,22 @@ typedef unsigned long long UInt64;
 typedef float Float;
 typedef double Double;
 typedef const char* String;
-
 typedef struct PDir PDir;
 typedef struct PFile PFile;
-
+typedef struct TArray TArray;
 Bool FBuilderProcess(UInt64 Flag, String* Args);
+Bool PGenerateUniqueID(Char* Buffer);
+Bool PFileMake(String Path);
+Bool PFileRemove(String Path);
 Bool PDirMake(String Path);
 Bool PDirRemove(String Path);
+UInt32 TArrayGetSize(TArray* Array);
+UInt32 TArrayGetMaxSize(TArray* Array);
+TArray* TArrayNew(UInt32 InitialSize);
+Void TArrayFree(TArray* Array);
+Char* TArrayPushSize(TArray* Array, UInt64 Size);
+Void TArrayRemove(TArray* Array, Char* Buffer);
+Char* TArrayGet(TArray* Array, UInt32 Index);
 
 int main(int argc, const char** argv) {
   VB_LOG("Init GT-Builder\n");
@@ -37,12 +46,85 @@ int main(int argc, const char** argv) {
     return 0;
   }
 
+  Char UUID[BUILDER_UUID_SIZE] = {0};
+  PGenerateUniqueID(UUID);
+  printf("UUID:%s\n", UUID);
+
   return 0;
 }
 
 // Builder Framework /=======================================/
+typedef struct {
+  Char* buffData;
+  UInt64 buffSize;
+} FEntry;
 
-Bool PGenerateUniqueID(Char* Buffer);
+struct TArray {
+  FEntry** entries;
+  UInt32 size;
+  UInt32 maxSize;
+};
+
+UInt32 TArrayGetSize(TArray* Array) {
+  return Array->size;
+}
+UInt32 TArrayGetMaxSize(TArray* Array) {
+  return Array->maxSize;
+}
+TArray* TArrayNew(UInt32 InitialSize) {
+  TArray* arr = (TArray*)malloc(sizeof(TArray));
+  if(arr == NULL) { return NULL; }
+  arr->size = 0;
+  arr->maxSize = InitialSize;
+  arr->entries = (FEntry**)calloc(arr->maxSize, sizeof(FEntry));
+  return arr;
+}
+Void TArrayFree(TArray* Array) {
+  for(UInt32 c = 0; c < Array->size; c++) {
+    free(Array->entries[c]->buffData);
+    free(Array->entries[c]);
+  }
+  free(Array->entries);
+  free(Array);
+}
+Char* TArrayPushSize(TArray* Array, UInt64 Size) {
+  if(Array->size + 1 >= Array->maxSize) {
+    UInt32 newMaxSize = Array->maxSize * 2;
+    FEntry** newEntries = (FEntry**)realloc(Array->entries, (Array->maxSize * sizeof(FEntry)));
+    if(newEntries == NULL) { return NULL; }
+    Array->entries = newEntries;
+    Array->maxSize = newMaxSize;
+  }
+  UInt32 index = Array->size++;
+  FEntry* entry = (FEntry*)calloc(1, sizeof(FEntry));
+  if(entry == NULL) { return NULL; }
+  entry->buffData = (Char*)calloc(1, Size);
+  entry->buffSize = Size;
+  Array->entries[index] = entry;
+
+  return entry->buffData;
+}
+Void TArrayRemove(TArray* Array, Char* Buffer) {
+  for(UInt32 c = 0; c < Array->size; c++) {
+    if(Array->entries[c]->buffData == Buffer) {
+      free(Array->entries[c]->buffData);
+      free(Array->entries[c]);
+      UInt64 size = (Array->size - c - 1) * sizeof(FEntry*);
+      memmove(Array->entries[c], Array->entries[c + 1], size);
+      Array->size--;
+      return;
+    }
+  }
+}
+Char* TArrayGet(TArray* Array, UInt32 Index) {
+  if(Index >= Array->size) {
+    return Array->entries[0]->buffData;
+  }
+  return Array->entries[Index]->buffData;
+}
+
+Bool FBuilderMake(String* Args);
+Bool FBuilderRemove(String* Args);
 Bool FBuilderEcho(String* Args);
 Bool FBuilderCat(String* Args);
 
@@ -56,7 +138,7 @@ Bool FBuilderProcess(UInt64 Flag, String* Args) {
       break;
     }
     if(strcmp(*Args, "--rmdir") == 0) {
-      VB_LOG("Builder => GT-RmDir\n");
+      VB_LOG("Builder => GT-DirRemove\n");
       PDirRemove(*(++Args));
       retVal = true;
       break;
@@ -73,6 +155,18 @@ Bool FBuilderProcess(UInt64 Flag, String* Args) {
       retVal = true;
       break;
     }
+    if(strcmp(*Args, "--mk") == 0) {
+      VB_LOG("Builder => GT-FileMake\n");
+      FBuilderMake(++Args);
+      retVal = true;
+      break;
+    }
+    if(strcmp(*Args, "--rm") == 0) {
+      VB_LOG("Builder => GT-FileRemove\n");
+      FBuilderRemove(++Args);
+      retVal = true;
+      break;
+    }
 
     Args++;
   }
@@ -80,24 +174,63 @@ Bool FBuilderProcess(UInt64 Flag, String* Args) {
   return retVal;
 }
 
-Bool FBuilderEcho(String* Args) {
-  FILE* fileOutput = NULL;
-  struct {
-    Char* data;
-    UInt32 count;
-    UInt32 size;
-  } bufferMessage;
-
-  bufferMessage.size = BUFFER_SIZE;
-  bufferMessage.data = (Char*)calloc(1, bufferMessage.size);
-  bufferMessage.count = 0;
-  if(bufferMessage.data == NULL) {
-    VB_LOG("Buffer Message Not Allocated\n");
-    return false;
+Bool FBuilderMake(String* Args) {
+  TArray* filesArray = TArrayNew(10);
+  Char pathBuffer[BUILDER_MAX_PATH] = {0};
+  UInt64 pathSize = 0;
+  while(*Args) {
+    if(strcmp(*Args, "-d") == 0) {
+      pathSize = strlen(*(++Args)) + 1;
+      snprintf(pathBuffer, BUILDER_MAX_PATH, "%s", *(Args++));
+      continue;
+    }
+    UInt64 size = strlen(*Args) + 1 + pathSize;
+    Char* data = TArrayPushSize(filesArray, size);
+    snprintf(data, size, "%s/%s", ((pathSize > 0) ? pathBuffer : ""), *Args);
+    Args++;
   }
 
+  UInt32 maxSize = TArrayGetSize(filesArray);
+  for(UInt32 c = 0; c < maxSize; c++) {
+    PFileMake(TArrayGet(filesArray, c));
+  }
+
+  TArrayFree(filesArray);
+  return true;
+}
+
+Bool FBuilderRemove(String* Args) {
+  TArray* filesArray = TArrayNew(10);
+  Char pathBuffer[BUILDER_MAX_PATH] = {0};
+
   while(*Args) {
-    if(strcmp(*Args, ">") == 0) {
+    if(strcmp(*(Args++), "-d") == 0) {
+      UInt64 size = strlen(*Args) + 1;
+      Char* data = TArrayPushSize(filesArray, size);
+      snprintf(data, size, "%s", *Args);
+      break;
+    }
+    UInt64 size = strlen(*Args) + 1;
+    Char* data = TArrayPushSize(filesArray, size);
+    snprintf(data, size, "%s", *Args);
+    Args++;
+  }
+
+  UInt32 maxSize = TArrayGetSize(filesArray);
+  for(UInt32 c = 0; c < maxSize; c++) {
+    PFileRemove(TArrayGet(filesArray, c));
+  }
+
+  TArrayFree(filesArray);
+  return true;
+}
+
+Bool FBuilderEcho(String* Args) {
+  FILE* fileOutput = NULL;
+  TArray* messageArray = TArrayNew(10);
+
+  while(*Args) {
+    if(strcmp(*Args, "-write") == 0) {
       fileOutput = fopen(*(++Args), "w");
       if(fileOutput == NULL) {
         VB_LOG("File %s not Opened\n", *Args);
@@ -105,7 +238,7 @@ Bool FBuilderEcho(String* Args) {
       }
       break;
 
-    } else if(strcmp(*Args, ">>") == 0) {
+    } else if(strcmp(*Args, "-append") == 0) {
       fileOutput = fopen(*(++Args), "a");
       if(fileOutput == NULL) {
         VB_LOG("File %s not Opened\n", *Args);
@@ -115,108 +248,95 @@ Bool FBuilderEcho(String* Args) {
 
     } else {
       UInt64 size = strlen(*Args) + 1;
-      if(bufferMessage.count + size >= bufferMessage.size) {
-        bufferMessage.size *= 2;
-        Char* newData = (Char*)realloc(bufferMessage.data, bufferMessage.size);
-        if(newData == NULL) {
-          VB_LOG("Buffer Message not Reallocated\n");
-          free(bufferMessage.data);
-          return false;
-        }
-        bufferMessage.data = newData;
-      }
-      memcpy(bufferMessage.data + bufferMessage.count, *Args, size);
-      bufferMessage.count += size;
-      bufferMessage.data[bufferMessage.count - 1] = ' ';
+      Char* data = TArrayPushSize(messageArray, size);
+      snprintf(data, size, "%.*s", (UInt32)size, *Args);
     }
     Args++;
   }
 
-  bufferMessage.data[bufferMessage.count - 1] = '\n';
-  bufferMessage.data[bufferMessage.count] = '\0';
   if(fileOutput != NULL) {
-    fprintf(fileOutput, "%s", bufferMessage.data);
+    for(UInt32 c = 0; c < messageArray->size; c++) {
+      fprintf(fileOutput, "%s", messageArray->entries[c]->buffData);
+    }
+    fprintf(fileOutput, "\n");
     fclose(fileOutput);
   } else {
-    printf("%s", bufferMessage.data);
+    for(UInt32 c = 0; c < messageArray->size; c++) {
+      printf("%s", messageArray->entries[c]->buffData);
+    }
+    printf("\n");
   }
 
-  free(bufferMessage.data);
+  TArrayFree(messageArray);
   return true;
 }
 
 Bool FBuilderCat(String* Args) {
   FILE* fileOutput = NULL;
-  struct {
-    Char** data;
-    UInt32 count;
-    UInt32 size;
-  } bufferList;
-
-  bufferList.size = BUILDER_INITIAL_SIZE;
-  bufferList.data = (Char**)calloc(bufferList.size, sizeof(Char*));
-  bufferList.count = 0;
-
-  if(bufferList.data == NULL) {
-    VB_LOG("bufferList Not Valid\n");
-    return false;
-  }
+  TArray* fileBuffers = TArrayNew(10);
 
   while(*Args) {
-    if(strcmp(*Args, ">>") == 0) {
+    if(strcmp(*Args, "-append") == 0) {
       VB_LOG("Cat Append\n");
-      fileOutput = fopen(*(++Args), "a");
-      if(fileOutput == NULL) { return false; }
+      fileOutput = fopen(*(++Args), "ab");
+      if(fileOutput == NULL) {
+        VB_LOG("File not exist -> %s\n", *Args);
+        return false;
+      }
+      break;
 
-    } else if(strcmp(*Args, ">") == 0) {
+    } else if(strcmp(*Args, "-write") == 0) {
       VB_LOG("Cat Write\n");
-      fileOutput = fopen(*(++Args), "w");
-      if(fileOutput == NULL) { return false; }
+      fileOutput = fopen(*(++Args), "wb");
+      if(fileOutput == NULL) {
+        VB_LOG("File not exist -> %s\n", *Args);
+        continue;
+      }
+      break;
 
     } else {
-      FILE* file = fopen(*Args, "r");
+      FILE* file = fopen(*Args, "rb");
       UInt64 size = 0;
       if(file == NULL) {
         VB_LOG("File not exist -> %s\n", *Args);
-        return false;
+        continue;
       }
 
       fseek(file, 0, SEEK_END);
       size = ftell(file);
       fseek(file, 0, SEEK_SET);
 
-      if(bufferList.count >= bufferList.size) {
-        bufferList.size *= 2;
-        Char** tempData = (Char**)realloc(bufferList.data, bufferList.size);
-        bufferList.data = (tempData != NULL) ? tempData : bufferList.data;
-        break;
-      }
-
-      Char* data = (Char*)calloc(1, size + 1);
+      Char* data = TArrayPushSize(fileBuffers, size);
       if(!data) { return false; }
       fread(data, 1, size, file);
       fclose(file);
-      bufferList.data[bufferList.count++] = data;
       Args++;
     }
   }
 
   if(fileOutput != NULL) {
-    for(UInt32 c = 0; c < bufferList.count; c++) {
-      fprintf(fileOutput, "%s", bufferList.data[c]);
-      fflush(fileOutput);
+    for(UInt32 c = 0; c < fileBuffers->size; c++) {
+      Char* data = fileBuffers->entries[c]->buffData;
+      UInt64 size = fileBuffers->entries[c]->buffSize;
+      fwrite(data, size, 1, fileOutput);
     }
     fclose(fileOutput);
   } else {
-    for(UInt32 c = 0; c < bufferList.count; c++) {
-      printf("%s", bufferList.data[c]);
+    for(UInt32 c = 0; c < fileBuffers->size; c++) {
+      Char* data = fileBuffers->entries[c]->buffData;
+      UInt64 size = fileBuffers->entries[c]->buffSize + 1;  // For 0/
+      Char* content = (Char*)calloc(1, size);
+      if(!content) {
+        TArrayFree(fileBuffers);
+        return false;
+      }
+      snprintf(content, size, "%.*s", (UInt32)size, data);
+      printf("%s", content);
+      free(content);
     }
   }
 
-  for(UInt32 c = 0; c < bufferList.count; c++) {
-    free(bufferList.data[c]);
-  }
-  free(bufferList.data);
+  TArrayFree(fileBuffers);
   return true;
 }
 
@@ -310,5 +430,137 @@ Bool PDirRemove(String Path) {
 }
 
 #elif defined(__linux__)
+#include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <uuid/uuid.h>
+
+Bool PGenerateUniqueID(Char* Buffer) {
+  if(Buffer == NULL) {
+    VB_LOG("Buffer for UUID is NULL\n");
+    return false;
+  }
+  typedef Void (*FOnUuidGenerate)(uuid_t);
+  typedef Void (*FOnUuidUnparseLower)(const uuid_t, Char*);
+  Void* libUuid = dlopen("libuuid.so", RTLD_LAZY);
+  if(libUuid == NULL) {
+    printf("libuuid.so Not Loaderd!!\n");
+    return false;
+  }
+  FOnUuidGenerate onUuidGenerate = dlsym(libUuid, "uuid_generate");
+  FOnUuidUnparseLower onUuidParseLower = dlsym(libUuid, "uuid_unparse_lower");
+
+  uuid_t uuid;
+  Char uuidBuffer[BUILDER_UUID_SIZE];
+  onUuidGenerate(uuid);
+  onUuidParseLower(uuid, uuidBuffer);
+  snprintf(Buffer, BUILDER_UUID_SIZE, "%s", uuidBuffer);
+  dlclose(libUuid);
+  return true;
+}
+
+Bool PFileMake(String Path) {
+  UInt32 size = strrchr(Path, '/') - Path + 1;
+  String path = Path;
+  Char pathBuffer[BUILDER_MAX_PATH] = {0};
+  UInt32 count = 0;
+
+  while(*path) {
+    if(count == size) {
+      break;
+    }
+    if(*path == '/') {
+      PDirMake(pathBuffer);
+    }
+    pathBuffer[count++] = *path;
+    path++;
+  }
+
+  UInt32 fd = open(Path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+  if(fd == -1) {
+    VB_LOG("File Not Opened ->%s\n", Path);
+    return false;
+  }
+  close(fd);
+  return true;
+}
+
+Bool PFileRemove(String Path) {
+  Char* dot = strrchr(Path, '.');
+  if(dot != NULL) {
+    return unlink(Path);
+  }
+  //TODO: Temporary code!
+  struct dirent* entry = NULL;
+  struct stat info;
+  DIR* dir = opendir(Path);
+  Char pathBuffer[BUILDER_MAX_PATH];
+
+  if(dir == NULL) {
+    VB_LOG("Path not exist -> %s\n", Path);
+    return false;
+  }
+
+  do {
+    entry = readdir(dir);
+    if(entry == NULL) { break; }
+    if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
+    snprintf(pathBuffer, BUILDER_MAX_PATH, "%s/%s", Path, entry->d_name);
+    if(stat(pathBuffer, &info) == 0) {
+      if(S_ISDIR(info.st_mode)) {
+        continue;
+      } else {
+        unlink(pathBuffer);
+      }
+    }
+  } while(entry != NULL);
+
+  closedir(dir);
+  return true;
+}
+
+Bool PDirMake(String Path) {
+  const UInt16 ATTRIBUTE = 0755;
+  Char pathBuffer[BUILDER_MAX_PATH] = {0};
+  UInt32 count = 0;
+  while(*Path) {
+    if(*Path == '/' || *Path == '\\') {
+      mkdir(pathBuffer, ATTRIBUTE);
+    }
+    pathBuffer[count++] = *(Path++);
+  }
+  return mkdir(pathBuffer, ATTRIBUTE);
+}
+
+Bool PDirRemove(String Path) {
+  struct dirent* entry = NULL;
+  struct stat info;
+  DIR* dir = opendir(Path);
+  Char pathBuffer[BUILDER_MAX_PATH];
+
+  if(dir == NULL) {
+    VB_LOG("Path not exist -> %s\n", Path);
+    return false;
+  }
+
+  do {
+    entry = readdir(dir);
+    if(entry == NULL) { break; }
+    if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
+    snprintf(pathBuffer, BUILDER_MAX_PATH, "%s/%s", Path, entry->d_name);
+    if(stat(pathBuffer, &info) == 0) {
+      if(S_ISDIR(info.st_mode)) {
+        PDirRemove(pathBuffer);
+      } else {
+        unlink(pathBuffer);
+      }
+    }
+  } while(entry != NULL);
+
+  closedir(dir);
+  return rmdir(Path);
+}
 
 #endif
