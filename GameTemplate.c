@@ -123,8 +123,10 @@ Char* TArrayGet(TArray* Array, UInt32 Index) {
   return Array->entries[Index]->buffData;
 }
 
-Bool FBuilderMake(String* Args);
-Bool FBuilderRemove(String* Args);
+Bool FBuildDirMake(String* Args);
+Bool FBuildDirRemove(String* Args);
+Bool FBuilderFileMake(String* Args);
+Bool FBuilderFileRemove(String* Args);
 Bool FBuilderEcho(String* Args);
 Bool FBuilderCat(String* Args);
 
@@ -133,13 +135,13 @@ Bool FBuilderProcess(UInt64 Flag, String* Args) {
   while(*Args) {
     if(strcmp(*Args, "--mkdir") == 0) {
       VB_LOG("Builder => GT-DirMake\n");
-      PDirMake(*(++Args));
+      FBuildDirMake(++Args);
       retVal = true;
       break;
     }
     if(strcmp(*Args, "--rmdir") == 0) {
       VB_LOG("Builder => GT-DirRemove\n");
-      PDirRemove(*(++Args));
+      FBuildDirRemove(++Args);
       retVal = true;
       break;
     }
@@ -157,13 +159,13 @@ Bool FBuilderProcess(UInt64 Flag, String* Args) {
     }
     if(strcmp(*Args, "--mk") == 0) {
       VB_LOG("Builder => GT-FileMake\n");
-      FBuilderMake(++Args);
+      FBuilderFileMake(++Args);
       retVal = true;
       break;
     }
     if(strcmp(*Args, "--rm") == 0) {
       VB_LOG("Builder => GT-FileRemove\n");
-      FBuilderRemove(++Args);
+      FBuilderFileRemove(++Args);
       retVal = true;
       break;
     }
@@ -174,19 +176,58 @@ Bool FBuilderProcess(UInt64 Flag, String* Args) {
   return retVal;
 }
 
-Bool FBuilderMake(String* Args) {
+// Criar e Remover Pastas
+Bool FBuildDirMake(String* Args){
+  TArray* dirsArray = TArrayNew(10);
+  while(*Args){
+    UInt16 size = strlen(*Args) +1 ;
+    Char* data = TArrayPushSize(dirsArray, size);
+    snprintf(data, size, "%s",*Args);
+    Args++;
+  }
+
+  UInt64 arraySize = TArrayGetSize(dirsArray);
+  for(UInt32 c = 0; c < arraySize; c++){
+    Char* path = TArrayGet(dirsArray, c);
+    PDirMake(path);
+  }
+
+  TArrayFree(dirsArray);
+  return false;
+}
+
+Bool FBuildDirRemove(String* Args){
+  TArray* dirsArray = TArrayNew(10);
+  while(*Args){
+    UInt16 size = strlen(*Args) +1 ;
+    Char* data = TArrayPushSize(dirsArray, size);
+    snprintf(data, size, "%s",*Args);
+    Args++;
+  }
+
+  UInt64 arraySize = TArrayGetSize(dirsArray);
+  for(UInt32 c = 0; c < arraySize; c++){
+    Char* path = TArrayGet(dirsArray, c);
+    PDirRemove(path);
+  }
+
+  TArrayFree(dirsArray);
+  return false;
+}
+
+Bool FBuilderFileMake(String* Args) {
   TArray* filesArray = TArrayNew(10);
   Char pathBuffer[BUILDER_MAX_PATH] = {0};
-  UInt64 pathSize = 0;
+  UInt64 pathSize = 1;
   while(*Args) {
     if(strcmp(*Args, "-d") == 0) {
       pathSize = strlen(*(++Args)) + 1;
-      snprintf(pathBuffer, BUILDER_MAX_PATH, "%s", *(Args++));
+      snprintf(pathBuffer, BUILDER_MAX_PATH, "%s/", *(Args++));
       continue;
     }
     UInt64 size = strlen(*Args) + 1 + pathSize;
     Char* data = TArrayPushSize(filesArray, size);
-    snprintf(data, size, "%s/%s", ((pathSize > 0) ? pathBuffer : ""), *Args);
+    snprintf(data, size, "%s%s", ((pathSize > 0) ? pathBuffer : ""), *Args);
     Args++;
   }
 
@@ -199,13 +240,13 @@ Bool FBuilderMake(String* Args) {
   return true;
 }
 
-Bool FBuilderRemove(String* Args) {
+Bool FBuilderFileRemove(String* Args) {
   TArray* filesArray = TArrayNew(10);
   Char pathBuffer[BUILDER_MAX_PATH] = {0};
 
   while(*Args) {
-    if(strcmp(*(Args++), "-d") == 0) {
-      UInt64 size = strlen(*Args) + 1;
+    if(strcmp(*Args, "-d") == 0) {
+      UInt64 size = strlen(*(++Args)) + 1;
       Char* data = TArrayPushSize(filesArray, size);
       snprintf(data, size, "%s", *Args);
       break;
@@ -462,12 +503,13 @@ Bool PGenerateUniqueID(Char* Buffer) {
 }
 
 Bool PFileMake(String Path) {
-  UInt32 size = strrchr(Path, '/') - Path + 1;
+  Char* lastSlash = strrchr(Path, '/');
+  UInt32 size = lastSlash - Path + 1;
   String path = Path;
   Char pathBuffer[BUILDER_MAX_PATH] = {0};
   UInt32 count = 0;
 
-  while(*path) {
+  while(*path && lastSlash) {
     if(count == size) {
       break;
     }

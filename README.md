@@ -28,7 +28,9 @@ gcc GameTemplate.c -o GT
 
 ## Examples
 ./GT --mkdir MyFolder/SubFolder/EndFolder  
+./GT --mkdir Folder1 Folder2 Folder3  
 ./GT --rmdir MyFolder/SubFolder  
+./GT --rmdir Folder1 Folder2 Folder3  
 ./GT --rm MyFolder/SubFolder/File1.h MyFolder2/SubFolder2/File.c  
 ./GT --rm -d MyFolder/SubFolder  
 ./GT --mk  MyFolder/SubFolder/File1.h MyFolder2/SubFolder2/File.c  
@@ -44,6 +46,7 @@ gcc GameTemplate.c -o GT
 Used to recursively create or remove folders.  
 Combines with subfolders will cause them to be created.  
 If you have files and subfolders, everything will be deleted.  
+Create and remove multiple folders at once.
 
 ## --rm or --mk
 Remove one or several files passed with '-rm'.  
