@@ -36,7 +36,7 @@ gcc GameTemplate.c -o GT
 ./GT --cat File1.txt print on screen  
 ./GT --cat File1.txt -write OutFile.txt Write to File  
 ./GT --cat File1.txt -append OutFile.txt Append to File  
-./GT --echo My Name is Gabriel print on screen 
+./GT --echo My Name is Gabriel print on screen  
 ./GT --echo My Name is Gabriel -write OutFile.txt Write to File  
 ./GT --echo My Name is Gabriel -append OutFile.txt Append to File  
 
